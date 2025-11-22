@@ -1,0 +1,152 @@
+// prisma/schema.prisma
+
+// ... (Generator, Datasource เหมือนเดิม) ...
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ... (Account, Session, VerificationToken, PortfolioItem, PriceAlert เหมือนเดิม) ...
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  accounts      Account[]
+  sessions      Session[]
+  portfolio     PortfolioItem[]
+  alerts        PriceAlert[]
+
+  // =================================================
+  // *** นี่คือส่วนที่ "เพิ่ม" เข้าไปใน User ***
+  snapshots     PortfolioSnapshot[] // (บอก User ว่ามี "สมุดบันทึก" ได้)
+  // =================================================
+  notifications Notification[]
+  bookmarkLists BookmarkList[]
+}
+
+model Account {
+  // ... (โค้ดเหมือนเดิม) ...
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  // ... (โค้Gดเหมือนเดิม) ...
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  // ... (โค้ดเหมือนเดิม) ...
+  identifier String
+  token      String   @unique
+  expires    DateTime
+  @@unique([identifier, token])
+}
+
+model PortfolioItem {
+  // ... (โค้ดเหมือนเดิม) ...
+  id            String   @id @default(cuid())
+  ticker        String
+  shares        Float
+  averagePrice  Float
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  @@unique([userId, ticker])
+}
+
+// =================================================
+// *** นี่คือ "ตารางใหม่" (สมุดบันทึก) ของเรา ***
+// =================================================
+model PortfolioSnapshot {
+  id          String   @id @default(cuid())
+  date        DateTime @default(now()) // วันที่บันทึก
+  totalValue  Float    // มูลค่ารวมของพอร์ตในวันนั้น
+
+  // กุญแจเชื่อมกลับไปหาเจ้าของ
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // สร้างกฎว่า 1 user บันทึกได้ 1 ครั้งต่อวัน
+  @@unique([userId, date])
+}
+// =================================================
+// *** ตารางใหม่สำหรับเก็บ "การแจ้งเตือน" ***
+// =================================================
+model Notification {
+  id        String   @id @default(cuid())
+  message   String   // เช่น "GOOG has reached your target of $180.00"
+  isRead    Boolean  @default(false) // สถานะว่าอ่านหรือยัง
+
+  // กุญแจเชื่อมกลับไปหาเจ้าของ
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  createdAt DateTime @default(now())
+
+  @@index([userId]) // เพิ่ม index ให้ค้นหาตาม user ได้เร็ว
+}
+// (วางต่อจาก Model สุดท้ายของคุณ)
+
+model BookmarkList {
+  id     String   @id @default(cuid())
+  name   String
+  createdAt DateTime @default(now())
+
+  // ความสัมพันธ์: List นี้เป็นของ User คนไหน
+  userId String
+  user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // ความสัมพันธ์: List นี้มี Item อะไรบ้าง
+  items  BookmarkItem[]
+
+  @@unique([userId, name]) // (ป้องกัน User สร้าง List ชื่อซ้ำ)
+}
+
+model BookmarkItem {
+  id     String   @id @default(cuid())
+  ticker String
+  createdAt DateTime @default(now())
+
+  // ความสัมพันธ์: Item นี้อยู่ใน List ไหน
+  listId String
+  list   BookmarkList @relation(fields: [listId], references: [id], onDelete: Cascade)
+
+  @@unique([listId, ticker]) // (ป้องกัน List 1 อัน มีหุ้นซ้ำ)
+}
+// (ต่อท้ายไฟล์)
+
+model PriceAlert {
+  id          String   @id @default(cuid())
+  ticker      String
+  targetPrice Float
+  condition   String   // 'gte' (มากกว่า) หรือ 'lte' (น้อยกว่า)
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
