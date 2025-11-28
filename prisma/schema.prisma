@@ -43,7 +43,10 @@ model Account {
   session_state     String?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // --- !!! VVVVVV เพิ่มบรรทัดนี้ (สำคัญมาก!) VVVVVV !!! ---
   @@unique([provider, providerAccountId])
+  // --- !!! ^^^^^^ ต้องมีบรรทัดนี้ครับ ^^^^^^ !!! ---
 }
 
 model Session {
