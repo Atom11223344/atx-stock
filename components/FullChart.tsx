@@ -10,7 +10,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import { EMA, MACD, RSI } from 'technicalindicators';
 import { Settings, Check, Bookmark, BookmarkPlus } from 'lucide-react';
 
-// --- Helper Functions ---
+// --- Helper Functions (เหมือนเดิม) ---
 function formatCandleData(res: any[]) { return res.map(b => ({ time: b.t / 1000 as Time, open: b.o, high: b.h, low: b.l, close: b.c })); }
 function formatLineData(res: any[]) { return res.map(b => ({ time: b.t / 1000 as Time, value: b.c })); }
 function calculateEMA(res: any[], period: number) { const c = res.map(b => b.c); const e = EMA.calculate({ period, values: c }); const diff = res.length - e.length; return e.map((v, i) => ({ time: res[diff + i].t / 1000 as Time, value: v })); }
@@ -38,7 +38,13 @@ export function FullChart({ data, currentTf }: { data: any, currentTf: string })
   useEffect(() => {
     if (!mainChartContainerRef.current || !data || !data.results) return;
     
-    // 1. Main Chart (ใส่ as any เพื่อแก้ Error Vercel เรื่อง rightPriceScale)
+    const cleanup = () => { 
+      if (mainChart) mainChart.remove();
+      if (macdChart) macdChart.remove();
+      if (rsiChart) rsiChart.remove();
+    };
+    
+    // 1. Main Chart
     const mainChart = createChart(mainChartContainerRef.current, { 
       width: mainChartContainerRef.current.clientWidth, 
       height: 500,
@@ -49,7 +55,6 @@ export function FullChart({ data, currentTf }: { data: any, currentTf: string })
       rightPriceScale: { width: 70, borderColor: '#374151' } 
     } as any);
 
-    // Series Data
     if (chartType === 'Line') {
       const lineSeries = mainChart.addSeries(LineSeries, { color: '#2962FF', lineWidth: 2 });
       lineSeries.setData(formatLineData(data.results));
@@ -65,7 +70,7 @@ export function FullChart({ data, currentTf }: { data: any, currentTf: string })
       mainChart.addSeries(LineSeries, { color: '#ffffff', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false }).setData(calculateEMA(data.results, 200));
     }
 
-    // 2. MACD Chart
+    // 2. MACD
     let macdChart: IChartApi | null = null;
     if (indicators.macd && macdChartContainerRef.current) {
       macdChart = createChart(macdChartContainerRef.current, { 
@@ -83,7 +88,7 @@ export function FullChart({ data, currentTf }: { data: any, currentTf: string })
       macdChart.addSeries(LineSeries, { color: '#ef5350', lineWidth: 2, priceLineVisible: false }).setData(signalLine);
     }
 
-    // 3. RSI Chart
+    // 3. RSI
     let rsiChart: IChartApi | null = null;
     if (indicators.rsi && rsiChartContainerRef.current) {
       rsiChart = createChart(rsiChartContainerRef.current, { 
@@ -101,40 +106,21 @@ export function FullChart({ data, currentTf }: { data: any, currentTf: string })
       rsiSeries.createPriceLine({ price: 30, color: 'green', lineStyle: 2, title: 'OS' });
     }
 
-    // --- Sync Charts (จุดที่แก้ไข) ---
+    // Sync Charts
     const charts = [mainChart, macdChart, rsiChart].filter(c => c !== null) as IChartApi[];
-    
     if (charts.length > 1) {
-      // 1. Sync TimeScale: แก้จาก applyOptions เป็น setVisibleRange (แก้ Error จุดที่ 1)
       charts[0].timeScale().subscribeVisibleTimeRangeChange(range => {
         if (range) {
           charts.forEach(c => {
-            if (c !== charts[0]) {
-               c.timeScale().setVisibleRange(range); 
-            }
+            if (c !== charts[0]) c.timeScale().setVisibleRange(range);
           });
         }
       });
-
-      // 2. Sync Crosshair: ปิดไว้ก่อนเพราะ API ไม่รองรับการ set crosshair ด้วยเวลาตรงๆ (แก้ Error จุดที่ 2)
-      /*
-      charts[0].subscribeCrosshairMove(param => {
-        charts.forEach(c => {
-          if (c !== charts[0]) {
-            // c.applyOptions(...) // ลบส่วนนี้ออก
-          }
-        });
-      });
-      */
     }
     
     mainChart.timeScale().fitContent();
 
-    return () => { 
-      mainChart.remove(); 
-      if (macdChart) macdChart.remove(); 
-      if (rsiChart) rsiChart.remove(); 
-    };
+    return cleanup;
   }, [data, chartType, indicators]);
 
   const handleTimeframeChange = (newTf: string) => {
@@ -144,17 +130,40 @@ export function FullChart({ data, currentTf }: { data: any, currentTf: string })
     setIndicators(prev => ({ ...prev, [key]: !prev[key] }));
   };
   
-  const tfButtonClass = (tf: string) => `px-4 py-2 text-sm font-bold rounded-full transition-all border ${currentTf === tf ? "bg-blue-600 text-white border-blue-500 shadow-[0_0_10px_theme(colors.blue.500)]" : "bg-gray-900 text-gray-400 border-gray-800 hover:bg-gray-800 hover:text-white"}`;
+  // สไตล์ปุ่ม Timeframe
+  const tfButtonClass = (tf: string) => 
+    `px-4 py-1.5 text-sm font-bold rounded-lg transition-all border ${
+      currentTf === tf 
+      ? "bg-blue-600 text-white border-blue-500 shadow-[0_0_10px_theme(colors.blue.500)]" 
+      : "bg-gray-900 text-gray-400 border-gray-800 hover:bg-gray-800 hover:text-white"
+    }`;
 
   return (
     <div className="space-y-4">
-      {/* Main Chart */}
+      
+      {/* --- 1. (ใหม่) Timeframe Bar (ย้ายมาไว้ข้างบนสุด) --- */}
+      <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+        {['1m', '1h', '4h', '1d', '1w', '1M'].map((tf) => (
+          <button 
+            key={tf} 
+            onClick={() => handleTimeframeChange(tf)} 
+            className={tfButtonClass(tf)}
+          >
+            {tf.toUpperCase()}
+          </button>
+        ))}
+      </div>
+
+      {/* --- 2. BOX 1: กราฟหลัก --- */}
       <div className="bg-black rounded-xl border-2 border-gray-800 overflow-hidden shadow-2xl relative">
+        
+        {/* Header ภายในกราฟ */}
         <div className="absolute top-0 left-0 w-full p-4 flex justify-between items-start z-10 pointer-events-none">
           <div className="pointer-events-auto bg-black/60 backdrop-blur-md px-4 py-2 rounded-lg border border-gray-700">
             <h1 className="text-3xl font-bold text-white tracking-wider">{ticker}</h1>
             <div className="text-xl font-mono text-green-400">${currentPrice.toFixed(2)}</div>
           </div>
+          
           <div className="flex gap-2 pointer-events-auto relative">
             <button onClick={() => setIsBookmarked(!isBookmarked)} className={`p-2.5 rounded-lg border transition-all ${isBookmarked ? 'bg-yellow-600 text-black border-yellow-500' : 'bg-gray-900 text-gray-300 border-gray-700 hover:bg-gray-800'}`}>
                 {isBookmarked ? <Bookmark className="w-6 h-6 fill-black" /> : <BookmarkPlus className="w-6 h-6" />}
@@ -180,23 +189,17 @@ export function FullChart({ data, currentTf }: { data: any, currentTf: string })
             )}
           </div>
         </div>
+
         <div ref={mainChartContainerRef} className="w-full h-[500px]" />
       </div>
 
-      {/* Indicators */}
+      {/* --- BOX 2: Indicators --- */}
       <div className="grid grid-cols-1 gap-4">
          {indicators.macd && <div className="bg-black rounded-xl border border-gray-800 p-1 relative h-[200px]"><span className="absolute top-2 left-2 text-[10px] font-bold text-gray-500 z-10">MACD</span><div ref={macdChartContainerRef} className="w-full h-full" /></div>}
          {indicators.rsi && <div className="bg-black rounded-xl border border-gray-800 p-1 relative h-[150px]"><span className="absolute top-2 left-2 text-[10px] font-bold text-gray-500 z-10">RSI</span><div ref={rsiChartContainerRef} className="w-full h-full" /></div>}
       </div>
 
-      {/* Timeframe */}
-      <div className="flex justify-center items-center py-2 bg-black border-t border-gray-800 fixed bottom-16 left-0 w-full z-20 backdrop-blur-lg bg-opacity-90">
-        <div className="flex gap-2 overflow-x-auto px-4">
-          {['1m', '1h', '4h', '1d', '1w', '1M'].map((tf) => (
-            <button key={tf} onClick={() => handleTimeframeChange(tf)} className={tfButtonClass(tf)}>{tf.toUpperCase()}</button>
-          ))}
-        </div>
-      </div>
+      {/* (ลบแถบ Timeframe ล่างสุดออกแล้ว) */}
     </div>
   );
 }
